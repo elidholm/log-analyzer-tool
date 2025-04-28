@@ -61,6 +61,14 @@ error() {
   exit 1
 }
 
+print_header() {
+  echo -e "\n${BLUE}==== $1 ====${NC}"
+}
+
+print_stat() {
+  echo -e "${YELLOW}$1:${NC} $2"
+}
+
 initialize_defaults() {
   LOG_FILE=""
   VERBOSE=false
@@ -81,7 +89,6 @@ parse_args() {
         ;;
       v)
         VERBOSE=true
-        set -x
         ;;
       n)
         TOP_N="${OPTARG}"
@@ -105,7 +112,6 @@ parse_args() {
             ;;
           verbose)
             VERBOSE=true
-            set -x
             ;;
           no-summary)
             SHOW_SUMMARY=false
@@ -156,10 +162,46 @@ validate_args() {
   fi
 }
 
+get_filter_command() {
+  FILTER_CMD="cat"
+
+  if [ -n "$FILTER_IP" ]; then
+    FILTER_CMD+=" | grep \"^$FILTER_IP \""
+  fi
+
+  if [ -n "$FILTER_PATH" ]; then
+    FILTER_CMD+=" | grep \"$FILTER_PATH\""
+  fi
+
+  if [ -n "$FILTER_STATUS" ]; then
+    FILTER_CMD+=" | grep \"\\\" $FILTER_STATUS \""
+  fi
+}
+
 main() {
   initialize_defaults
   parse_args "$@"
   validate_args
+
+  # Show script header
+  echo -e "${GREEN}Log Analyzer Report${NC}"
+  echo -e "${GREEN}Generated on: $(date '+%Y-%m-%d %H:%M:%S')${NC}"
+  echo -e "${GREEN}Analyzing log file: ${LOG_FILE}${NC}"
+
+  if [ "$VERBOSE" = true ]; then
+    print_header "Log File Information"
+    print_stat "File Size" "$(du -h "$LOG_FILE" | cut -f1)"
+    print_stat "Line Count" "$(wc -l < "$LOG_FILE")"
+    print_stat "Date Range" "$(head -n1 "$LOG_FILE" | grep -o '\[[^]]*\]' | head -1) to $(tail -n1 "$LOG_FILE" | grep -o '\[[^]]*\]' | head -1)"
+
+    if [[ -n "$FILTER_IP" || -n "$FILTER_PATH" || -n "$FILTER_STATUS" || -n "$TIME_RANGE" ]]; then
+        print_header "Active Filters"
+        [[ -n "$TIME_RANGE" ]] && print_stat "Time Range" "$TIME_RANGE"
+        [[ -n "$FILTER_IP" ]] && print_stat "IP Filter" "$FILTER_IP"
+        [[ -n "$FILTER_PATH" ]] && print_stat "Path Filter" "$FILTER_PATH"
+        [[ -n "$FILTER_STATUS" ]] && print_stat "Status Filter" "$FILTER_STATUS"
+    fi
+  fi
 }
 
 main "$@"
