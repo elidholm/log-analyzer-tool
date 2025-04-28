@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+
+# log-analyzer - A simple CLI tool to analyze log files
+# Author: Edvin Lidholm
+# Date: 2025-04-28
+
+set -eo pipefail
+
+# Color definitions
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+RED='\033[0;31m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+print_usage() {
+  cat <<EOF
+
+Usage: ${0##*/} [OPTIONS] <log-file>
+
+Options:
+  -h, --help            Show this help message and exit
+  -v, --verbose         Display more detailed output
+  -n NUMBER             Show top N results (default: 5)
+  -o SECTION            Only show specific section (ip, path, status, agent)
+  -i IP                 Filter by specific IP address
+  -p PATH               Filter by specific request path
+  -s STATUS             Filter by HTTP status code
+  --no-summary          Skip the summary section
+
+Examples:
+  ${0##*/} nginx-access.log
+  ${0##*/} -v -n 10 nginx-access.log
+  ${0##*/} -o ip -i 192.168.1.1 nginx-access.log
+  ${0##*/} -s 404 nginx-access.log
+
+EOF
+}
+
+print_help() {
+  echo "A CLI tool to analyze web server log files."
+  print_usage
+  exit 0
+}
+
+log_message() {
+  echo -e "${BLUE}[$(date '+%Y-%m-%d %H:%M:%S')]${NC} $1"
+}
+
+success() {
+  echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] $1${NC}"
+}
+
+warning() {
+  echo -e "${YELLOW}[$(date '+%Y-%m-%d %H:%M:%S')] Warning: $1${NC}" >&2
+}
+
+error() {
+  echo -e "${RED}[$(date '+%Y-%m-%d %H:%M:%S')] Error: $1${NC}" >&2
+  exit 1
+}
+
+initialize_defaults() {
+  LOG_FILE=""
+  VERBOSE=false
+  TOP_N=5
+  SHOW_SUMMARY=true
+  FILTER_IP=""
+  FILTER_PATH=""
+  FILTER_STATUS=""
+  ONLY_SECTION=""
+}
+
+parse_args() {
+  OPTSTRING=":hvn:o:i:p:s:-:"
+  while getopts ${OPTSTRING} opt; do
+    case ${opt} in
+      h)
+        print_help
+        ;;
+      v)
+        VERBOSE=true
+        set -x
+        ;;
+      n)
+        TOP_N="${OPTARG}"
+        ;;
+      o)
+        ONLY_SECTION="${OPTARG}"
+        ;;
+      i)
+        FILTER_IP="${OPTARG}"
+        ;;
+      p)
+        FILTER_PATH="${OPTARG}"
+        ;;
+      s)
+        FILTER_STATUS="${OPTARG}"
+        ;;
+      -)
+        case "${OPTARG}" in
+          help)
+            print_help
+            ;;
+          verbose)
+            VERBOSE=true
+            set -x
+            ;;
+          no-summary)
+            SHOW_SUMMARY=false
+            ;;
+          *)
+            error "Invalid option: --${OPTARG}"
+            ;;
+        esac
+        ;;
+      :)
+        error "Option -${OPTARG} requires an argument."
+        ;;
+      \?)
+        error "Invalid option: -${OPTARG}"
+        ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+
+  LOG_FILE="$1"
+}
+
+validate_args() {
+  if [ -z "$LOG_FILE" ]; then
+    error "Log file not specified. Use '${0##*/} --help' for usage information."
+  fi
+
+  if [ ! -f "$LOG_FILE" ]; then
+    error "Log file does not exist: $LOG_FILE"
+  fi
+
+  if [[ "$TOP_N" =~ ^[0-9]+$ ]]; then
+    if [ "$TOP_N" -lt 1 ]; then
+      error "-n argument must be greater than 0."
+    fi
+  else
+    error "-n requires a positive number argument."
+  fi
+
+  if [ -n "$ONLY_SECTION" ]; then
+    case "$ONLY_SECTION" in
+      ip|path|status|agent)
+        ;;
+      *)
+        error "Invalid section: $ONLY_SECTION. Valid sections are: ip, path, status, agent."
+        ;;
+    esac
+  fi
+}
+
+main() {
+  initialize_defaults
+  parse_args "$@"
+  validate_args
+}
+
+main "$@"
