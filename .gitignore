@@ -1,0 +1,10 @@
+# Logs and sample data
+*.log
+sample_data/
+
+# User-specific IDS files
+.vscode/
+*.sublime-*
+
+# Temporary files
+*.tmp
