@@ -1,0 +1,358 @@
+#!/usr/bin/env bash
+
+# log-analyzer - A simple CLI tool to analyze log files
+# Author: Edvin Lidholm
+# Date: 2025-04-28
+
+LC_NUMERIC="en_US.UTF-8"
+
+# Color definitions
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+RED='\033[0;31m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+print_usage() {
+  cat <<EOF
+
+Usage: ${0##*/} [OPTIONS] <log-file>
+
+Options:
+  -h, --help            Show this help message and exit
+  -v, --verbose         Display more detailed output
+  -n NUMBER             Show top N results (default: 5)
+  -o SECTION            Only show specific section (ip, path, status, agent)
+  -i IP                 Filter by specific IP address
+  -p PATH               Filter by specific request path
+  -s STATUS             Filter by HTTP status code
+  --no-summary          Skip the summary section
+
+Examples:
+  ${0##*/} nginx-access.log
+  ${0##*/} -v -n 10 nginx-access.log
+  ${0##*/} -o ip -i 192.168.1.1 nginx-access.log
+  ${0##*/} -s 404 nginx-access.log
+
+EOF
+}
+
+print_help() {
+  echo "A CLI tool to analyze web server log files."
+  print_usage
+  exit 0
+}
+
+log_message() {
+  echo -e "${BLUE}$1${NC}"
+}
+
+warning() {
+  echo -e "${YELLOW}Warning: $1${NC}" >&2
+}
+
+error() {
+  echo -e "${RED}Error: $1${NC}" >&2
+  exit 1
+}
+
+print_header() {
+  echo -e "\n${BLUE}==== $1 ====${NC}"
+}
+
+print_stat() {
+  echo -e "${YELLOW}$1${NC} - ${CYAN}$2${NC}"
+}
+
+initialize_defaults() {
+  LOG_FILE=""
+  VERBOSE=false
+  TOP_N=5
+  SHOW_SUMMARY=true
+  FILTER_IP=""
+  FILTER_PATH=""
+  FILTER_STATUS=""
+  ONLY_SECTION=""
+}
+
+parse_args() {
+  OPTSTRING=":hvn:o:i:p:s:-:"
+  while getopts ${OPTSTRING} opt; do
+    case ${opt} in
+      h)
+        print_help
+        ;;
+      v)
+        VERBOSE=true
+        ;;
+      n)
+        TOP_N="${OPTARG}"
+        ;;
+      o)
+        ONLY_SECTION="${OPTARG}"
+        ;;
+      i)
+        FILTER_IP="${OPTARG}"
+        ;;
+      p)
+        FILTER_PATH="${OPTARG}"
+        ;;
+      s)
+        FILTER_STATUS="${OPTARG}"
+        ;;
+      -)
+        case "${OPTARG}" in
+          help)
+            print_help
+            ;;
+          verbose)
+            VERBOSE=true
+            ;;
+          no-summary)
+            SHOW_SUMMARY=false
+            ;;
+          *)
+            error "Invalid option: --${OPTARG}"
+            ;;
+        esac
+        ;;
+      :)
+        error "Option -${OPTARG} requires an argument."
+        ;;
+      \?)
+        error "Invalid option: -${OPTARG}"
+        ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+
+  LOG_FILE="$1"
+  if [ -n "$LOG_FILE" ] && ! [[ "$LOG_FILE" == /* || "$LOG_FILE" == .* ]] ; then
+    LOG_FILE="./$LOG_FILE"
+  fi
+}
+
+validate_args() {
+  if [ -z "$LOG_FILE" ]; then
+    error "Log file not specified. Use '${0##*/} --help' for usage information."
+  fi
+
+  if [ ! -f "$LOG_FILE" ]; then
+    error "Log file does not exist: $LOG_FILE"
+  fi
+
+  if [[ "$TOP_N" =~ ^[0-9]+$ ]]; then
+    if [ "$TOP_N" -lt 1 ]; then
+      error "-n argument must be greater than 0."
+    fi
+  else
+    error "-n requires a positive number argument."
+  fi
+
+  if [ -n "$ONLY_SECTION" ]; then
+    case "$ONLY_SECTION" in
+      ip|path|status|agent)
+        ;;
+      *)
+        error "Invalid section: $ONLY_SECTION. Valid sections are: ip, path, status, agent."
+        ;;
+    esac
+  fi
+}
+
+get_filter_command() {
+  FILTER_CMD="cat"
+
+  if [ -n "$FILTER_IP" ]; then
+    FILTER_CMD+=" | grep \"^$FILTER_IP \""
+  fi
+
+  if [ -n "$FILTER_PATH" ]; then
+    FILTER_CMD+=" | grep \"$FILTER_PATH\""
+  fi
+
+  if [ -n "$FILTER_STATUS" ]; then
+    FILTER_CMD+=" | grep \"\\\" $FILTER_STATUS \""
+  fi
+}
+
+no_matches() {
+  echo
+  warning "No matching log entries found with current filters."
+  log_message "Please check your filters or try again."
+  rm -f "$TEMP_FILE"
+  exit 0
+}
+
+calculate_percentage() {
+  local total=$1
+  local part=$2
+  local percentage
+  percentage=$(echo "$part/$total*100" | bc -l)
+  printf "%.2f%%" "$percentage"
+}
+
+analyze_ips() {
+  print_header "Top $TOP_N IP Addresses"
+  awk '{print $1}' "$TEMP_FILE" | sort | uniq -c | sort -nr | head -n "$TOP_N" | while read -r count ip; do
+    if $VERBOSE; then
+        percentage=$(calculate_percentage "$TOTAL_REQUESTS" "$count")
+        print_stat "$ip" "$count requests ($percentage)"
+    else
+        print_stat "$ip" "$count requests"
+    fi
+  done
+}
+
+analyze_paths() {
+  print_header "Top $TOP_N Request Paths"
+  awk '{print $7}' "$TEMP_FILE" | sort | uniq -c | sort -nr | head -n "$TOP_N" | while read -r count path; do
+    if $VERBOSE; then
+        percentage=$(calculate_percentage "$TOTAL_REQUESTS" "$count")
+        print_stat "$path" "$count requests ($percentage)"
+    else
+        print_stat "$path" "$count requests"
+    fi
+  done
+}
+
+analyze_status() {
+  print_header "Top $TOP_N HTTP Status Codes"
+  awk '{printf ""; for(i=1; i<=NF; i++) if($i ~ /^[0-9]+$/) printf "%s ", $i; printf "\n"}' "$TEMP_FILE" | awk '{print $1}' | sort | uniq -c | sort -nr | head -n "$TOP_N" | while read -r count status; do
+    if $VERBOSE; then
+        percentage=$(calculate_percentage "$TOTAL_REQUESTS" "$count")
+        print_stat "$status" "$count requests ($percentage)"
+    else
+        print_stat "$status" "$count requests"
+    fi
+  done
+}
+
+analyze_user_agents() {
+  print_header "Top $TOP_N User Agents"
+  awk -F\" '{print $6}' "$TEMP_FILE" | sed '/^-$/d'| sort | uniq -c  | sort -nr | head -n "$TOP_N" | while read -r count agent; do
+    if $VERBOSE; then
+        percentage=$(calculate_percentage "$TOTAL_REQUESTS" "$count")
+        print_stat "$agent" "$count requests ($percentage)"
+    else
+        print_stat "$agent" "$count requests"
+    fi
+  done
+}
+
+analyze_http_methods() {
+  print_header "Top $TOP_N HTTP Methods"
+  awk -F\" '{print $2}' "$TEMP_FILE" | sed '/^\\/d' | awk '{print $1}' | sort | uniq -c | sort -nr | head -n "$TOP_N" | while read -r count method; do
+    if $VERBOSE; then
+        percentage=$(calculate_percentage "$TOTAL_REQUESTS" "$count")
+        print_stat "$method" "$count requests ($percentage)"
+    else
+        print_stat "$method" "$count requests"
+    fi
+  done
+}
+
+show_request_summary() {
+  print_header "Request Summary"
+
+  # Status code distribution
+  success=$(grep -c "\" 2[0-9][0-9] " "$TEMP_FILE")
+  redirect=$(grep -c "\" 3[0-9][0-9] " "$TEMP_FILE")
+  client_error=$(grep -c "\" 4[0-9][0-9] " "$TEMP_FILE")
+  server_error=$(grep -c "\" 5[0-9][0-9] " "$TEMP_FILE")
+
+  print_stat "Total Requests" "$TOTAL_REQUESTS"
+  echo
+  print_stat "Successfull Responses (2xx)" "$success ($(calculate_percentage "$TOTAL_REQUESTS" "$success"))"
+  print_stat "Redirect Responses (3xx)" "$redirect ($(calculate_percentage "$TOTAL_REQUESTS" "$redirect"))"
+  print_stat "Client Errors (4xx)" "$client_error ($(calculate_percentage "$TOTAL_REQUESTS" "$client_error"))"
+  print_stat "Server Errors (5xx)" "$server_error ($(calculate_percentage "$TOTAL_REQUESTS" "$server_error"))"
+
+  # Traffic volume
+  if $VERBOSE; then
+    total_bytes=$(awk -F\" '{print $3}' "$TEMP_FILE" | awk '{sum += $2} END {print sum}')
+    avg_bytes=$(awk -F\" '{print $3}' "$TEMP_FILE" | awk '{sum += $2} END {printf "%.2f", sum/NR}')
+
+    echo
+    if [[ "$total_bytes" -gt 1073741824 ]]; then
+      traffic_gb=$(printf "%.2f" "$(echo "$total_bytes/1073741824" | bc -l)")
+      print_stat "Total Traffic" "$traffic_gb GB"
+    elif [[ "$total_bytes" -gt 1048576 ]]; then
+      traffic_mb=$(printf "%.2f" "$(echo "$total_bytes/1048576" | bc -l)")
+      print_stat "Total Traffic" "$traffic_mb MB"
+    elif [[ "$total_bytes" -gt 1024 ]]; then
+      traffic_kb=$(printf "%.2f" "$(echo "$total_bytes/1024" | bc -l)")
+      print_stat "Total Traffic" "$traffic_kb KB"
+    else
+      print_stat "Total Traffic" "$total_bytes Bytes"
+    fi
+
+    print_stat "Average Resonse Size" "$avg_bytes Bytes"
+  fi
+}
+
+main() {
+  initialize_defaults
+  parse_args "$@"
+  validate_args
+
+  # Show script header
+  echo -e "${GREEN}Log Analyzer Report${NC}"
+  echo -e "${GREEN}Generated on: $(date '+%Y-%m-%d %H:%M:%S')${NC}"
+  echo -e "${GREEN}Analyzing log file: ${LOG_FILE}${NC}"
+
+  if "$VERBOSE"; then
+    print_header "Log File Information"
+    print_stat "File Size" "$(du -h "$LOG_FILE" | cut -f1)"
+    print_stat "Line Count" "$(wc -l < "$LOG_FILE")"
+    print_stat "Date Range" "$(head -n1 "$LOG_FILE" | grep -o '\[[^]]*\]' | head -1) to $(tail -n1 "$LOG_FILE" | grep -o '\[[^]]*\]' | head -1)"
+
+    if [[ -n "$FILTER_IP" || -n "$FILTER_PATH" || -n "$FILTER_STATUS" || -n "$TIME_RANGE" ]]; then
+      print_header "Active Filters"
+      [[ -n "$TIME_RANGE" ]] && print_stat "Time Range" "$TIME_RANGE"
+      [[ -n "$FILTER_IP" ]] && print_stat "IP Filter" "$FILTER_IP"
+      [[ -n "$FILTER_PATH" ]] && print_stat "Path Filter" "$FILTER_PATH"
+      [[ -n "$FILTER_STATUS" ]] && print_stat "Status Filter" "$FILTER_STATUS"
+    fi
+  fi
+
+  get_filter_command
+  TEMP_FILE=$(mktemp)
+  eval "$FILTER_CMD" < "$LOG_FILE" > "$TEMP_FILE" || no_matches
+
+  TOTAL_REQUESTS=$(wc -l < "$TEMP_FILE")
+
+  # Main analysis based on selected section
+  if [[ "$ONLY_SECTION" == "ip" || -z "$ONLY_SECTION" ]] && [ -z "$FILTER_IP" ]; then
+    analyze_ips
+  fi
+
+  if [[ "$ONLY_SECTION" == "path" || -z "$ONLY_SECTION" ]] && [ -z "$FILTER_PATH" ]; then
+    analyze_paths
+  fi
+
+  if [[ "$ONLY_SECTION" == "status" || -z "$ONLY_SECTION" ]] && [ -z "$FILTER_STATUS" ]; then
+    analyze_status
+  fi
+
+  if [[ "$ONLY_SECTION" == "agent" || -z "$ONLY_SECTION" ]];  then
+    analyze_user_agents
+  fi
+
+  if [[ -z "$ONLY_SECTION" ]]; then
+    analyze_http_methods
+  fi
+
+  if $SHOW_SUMMARY && [[ -z "$ONLY_SECTION" ]]; then
+    show_request_summary
+  fi
+
+  if $VERBOSE; then
+    echo -e "\n${GREEN}Analysis completed at: $(date '+%Y-%m-%d %H:%M:%S')${NC}"
+    echo -e "${GREEN}Log file: $LOG_FILE${NC}"
+    echo -e "${GREEN}Total lines processed: $TOTAL_REQUESTS${NC}"
+  fi
+}
+
+main "$@"
