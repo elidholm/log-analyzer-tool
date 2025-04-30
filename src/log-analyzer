@@ -233,6 +233,18 @@ analyze_status() {
   done
 }
 
+analyze_user_agents() {
+  print_header "Top $TOP_N User Agents"
+  awk -F\" '{print $6}' "$TEMP_FILE" | sed '/^-$/d'| sort | uniq -c  | sort -nr | head -n "$TOP_N" | while read -r count agent; do
+    if $VERBOSE; then
+        percentage=$(calculate_percentage "$TOTAL_REQUESTS" "$count")
+        print_stat "$agent" "$count requests ($percentage)"
+    else
+        print_stat "$agent" "$count requests"
+    fi
+  done
+}
+
 main() {
   initialize_defaults
   parse_args "$@"
@@ -275,6 +287,10 @@ main() {
 
   if [[ "$ONLY_SECTION" == "status" || -z "$ONLY_SECTION" ]] && [ -z "$FILTER_STATUS" ]; then
     analyze_status
+  fi
+
+  if [[ "$ONLY_SECTION" == "agent" || -z "$ONLY_SECTION" ]];  then
+    analyze_user_agents
   fi
 }
 
