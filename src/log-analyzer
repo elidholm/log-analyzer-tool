@@ -45,19 +45,15 @@ print_help() {
 }
 
 log_message() {
-  echo -e "${BLUE}[$(date '+%Y-%m-%d %H:%M:%S')]${NC} $1"
-}
-
-success() {
-  echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] $1${NC}"
+  echo -e "${BLUE}$1${NC}"
 }
 
 warning() {
-  echo -e "${YELLOW}[$(date '+%Y-%m-%d %H:%M:%S')] Warning: $1${NC}" >&2
+  echo -e "${YELLOW}Warning: $1${NC}" >&2
 }
 
 error() {
-  echo -e "${RED}[$(date '+%Y-%m-%d %H:%M:%S')] Error: $1${NC}" >&2
+  echo -e "${RED}Error: $1${NC}" >&2
   exit 1
 }
 
@@ -191,9 +187,9 @@ no_matches() {
 
 calculate_percentage() {
   local total=$1
-  local used=$2
+  local part=$2
   local percentage
-  percentage=$(echo "$used/$total*100" | bc -l)
+  percentage=$(echo "$part/$total*100" | bc -l)
   printf "%.2f%%" "$percentage"
 }
 
@@ -247,7 +243,7 @@ analyze_user_agents() {
 
 analyze_http_methods() {
   print_header "Top $TOP_N HTTP Methods"
-  awk -F\" '{print $2, NR}' "$TEMP_FILE" | sed '/^\\/d' | awk '{print $1}' | sort | uniq -c | sort -nr | head -n "$TOP_N" | while read -r count method; do
+  awk -F\" '{print $2}' "$TEMP_FILE" | sed '/^\\/d' | awk '{print $1}' | sort | uniq -c | sort -nr | head -n "$TOP_N" | while read -r count method; do
     if $VERBOSE; then
         percentage=$(calculate_percentage "$TOTAL_REQUESTS" "$count")
         print_stat "$method" "$count requests ($percentage)"
@@ -255,6 +251,45 @@ analyze_http_methods() {
         print_stat "$method" "$count requests"
     fi
   done
+}
+
+show_request_summary() {
+  print_header "Request Summary"
+
+  # Status code distribution
+  success=$(grep -c "\" 2[0-9][0-9] " "$TEMP_FILE")
+  redirect=$(grep -c "\" 3[0-9][0-9] " "$TEMP_FILE")
+  client_error=$(grep -c "\" 4[0-9][0-9] " "$TEMP_FILE")
+  server_error=$(grep -c "\" 5[0-9][0-9] " "$TEMP_FILE")
+
+  print_stat "Total Requests" "$TOTAL_REQUESTS"
+  echo
+  print_stat "Successfull Responses (2xx)" "$success ($(calculate_percentage "$TOTAL_REQUESTS" "$success"))"
+  print_stat "Redirect Responses (3xx)" "$redirect ($(calculate_percentage "$TOTAL_REQUESTS" "$redirect"))"
+  print_stat "Client Errors (4xx)" "$client_error ($(calculate_percentage "$TOTAL_REQUESTS" "$client_error"))"
+  print_stat "Server Errors (5xx)" "$server_error ($(calculate_percentage "$TOTAL_REQUESTS" "$server_error"))"
+
+  # Traffic volume
+  if $VERBOSE; then
+    total_bytes=$(awk -F\" '{print $3}' "$TEMP_FILE" | awk '{sum += $2} END {print sum}')
+    avg_bytes=$(awk -F\" '{print $3}' "$TEMP_FILE" | awk '{sum += $2} END {printf "%.2f", sum/NR}')
+
+    echo
+    if [[ "$total_bytes" -gt 1073741824 ]]; then
+      traffic_gb=$(printf "%.2f" "$(echo "$total_bytes/1073741824" | bc -l)")
+      print_stat "Total Traffic" "$traffic_gb GB"
+    elif [[ "$total_bytes" -gt 1048576 ]]; then
+      traffic_mb=$(printf "%.2f" "$(echo "$total_bytes/1048576" | bc -l)")
+      print_stat "Total Traffic" "$traffic_mb MB"
+    elif [[ "$total_bytes" -gt 1024 ]]; then
+      traffic_kb=$(printf "%.2f" "$(echo "$total_bytes/1024" | bc -l)")
+      print_stat "Total Traffic" "$traffic_kb KB"
+    else
+      print_stat "Total Traffic" "$total_bytes Bytes"
+    fi
+
+    print_stat "Average Resonse Size" "$avg_bytes Bytes"
+  fi
 }
 
 main() {
@@ -307,6 +342,16 @@ main() {
 
   if [[ -z "$ONLY_SECTION" ]]; then
     analyze_http_methods
+  fi
+
+  if $SHOW_SUMMARY && [[ -z "$ONLY_SECTION" ]]; then
+    show_request_summary
+  fi
+
+  if $VERBOSE; then
+    echo -e "\n${GREEN}Analysis completed at: $(date '+%Y-%m-%d %H:%M:%S')${NC}"
+    echo -e "${GREEN}Log file: $LOG_FILE${NC}"
+    echo -e "${GREEN}Total lines processed: $TOTAL_REQUESTS${NC}"
   fi
 }
 
