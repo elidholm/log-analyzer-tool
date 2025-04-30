@@ -132,7 +132,7 @@ parse_args() {
   shift $((OPTIND - 1))
 
   LOG_FILE="$1"
-  if ! [[ "$LOG_FILE" == /* || "$LOG_FILE" == .* ]] ; then
+  if [ -n "$LOG_FILE" ] && ! [[ "$LOG_FILE" == /* || "$LOG_FILE" == .* ]] ; then
     LOG_FILE="./$LOG_FILE"
   fi
 }
@@ -245,6 +245,18 @@ analyze_user_agents() {
   done
 }
 
+analyze_http_methods() {
+  print_header "Top $TOP_N HTTP Methods"
+  awk -F\" '{print $2, NR}' "$TEMP_FILE" | sed '/^\\/d' | awk '{print $1}' | sort | uniq -c | sort -nr | head -n "$TOP_N" | while read -r count method; do
+    if $VERBOSE; then
+        percentage=$(calculate_percentage "$TOTAL_REQUESTS" "$count")
+        print_stat "$method" "$count requests ($percentage)"
+    else
+        print_stat "$method" "$count requests"
+    fi
+  done
+}
+
 main() {
   initialize_defaults
   parse_args "$@"
@@ -291,6 +303,10 @@ main() {
 
   if [[ "$ONLY_SECTION" == "agent" || -z "$ONLY_SECTION" ]];  then
     analyze_user_agents
+  fi
+
+  if [[ -z "$ONLY_SECTION" ]]; then
+    analyze_http_methods
   fi
 }
 
