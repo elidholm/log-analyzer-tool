@@ -66,7 +66,7 @@ print_header() {
 }
 
 print_stat() {
-  echo -e "${YELLOW}$1:${NC} $2"
+  echo -e "${YELLOW}$1${NC} - ${CYAN}$2${NC}"
 }
 
 initialize_defaults() {
@@ -132,6 +132,9 @@ parse_args() {
   shift $((OPTIND - 1))
 
   LOG_FILE="$1"
+  if ! [[ "$LOG_FILE" == /* || "$LOG_FILE" == .* ]] ; then
+    LOG_FILE="./$LOG_FILE"
+  fi
 }
 
 validate_args() {
@@ -199,9 +202,9 @@ analyze_ips() {
   awk '{print $1}' "$TEMP_FILE" | sort | uniq -c | sort -nr | head -n "$TOP_N" | while read -r count ip; do
     if $VERBOSE; then
         percentage=$(calculate_percentage "$TOTAL_REQUESTS" "$count")
-        print_stat "$ip" "$count $percentage" | awk '{printf "%-27s %5.0f requests (%.2f%%)\n", $1, $2, $3}'
+        print_stat "$ip" "$count requests ($percentage)"
     else
-        print_stat "$ip" "$count" | awk '{printf "%-27s %5.0f requests\n", $1, $2}'
+        print_stat "$ip" "$count requests"
     fi
   done
 }
@@ -211,9 +214,9 @@ analyze_paths() {
   awk '{print $7}' "$TEMP_FILE" | sort | uniq -c | sort -nr | head -n "$TOP_N" | while read -r count path; do
     if $VERBOSE; then
         percentage=$(calculate_percentage "$TOTAL_REQUESTS" "$count")
-        print_stat "$path" "$count $percentage" | awk '{printf "%-35s %5.0f requests (%.2f%%)\n", $1, $2, $3}'
+        print_stat "$path" "$count requests ($percentage)"
     else
-        print_stat "$path" "$count" | awk '{printf "%-35s %5.0f requests\n", $1, $2}'
+        print_stat "$path" "$count requests"
     fi
   done
 }
@@ -223,9 +226,9 @@ analyze_status() {
   awk '{printf ""; for(i=1; i<=NF; i++) if($i ~ /^[0-9]+$/) printf "%s ", $i; printf "\n"}' "$TEMP_FILE" | awk '{print $1}' | sort | uniq -c | sort -nr | head -n "$TOP_N" | while read -r count status; do
     if $VERBOSE; then
         percentage=$(calculate_percentage "$TOTAL_REQUESTS" "$count")
-        print_stat "$status" "$count $percentage" | awk '{printf "%-10s %5.0f requests (%.2f%%)\n", $1, $2, $3}'
+        print_stat "$status" "$count requests ($percentage)"
     else
-        print_stat "$status" "$count" | awk '{printf "%-10s %5.0f requests\n", $1, $2}'
+        print_stat "$status" "$count requests"
     fi
   done
 }
