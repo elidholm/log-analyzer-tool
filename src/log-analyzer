@@ -6,6 +6,8 @@
 
 set -eo pipefail
 
+LC_NUMERIC="en_US.UTF-8"
+
 # Color definitions
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -185,6 +187,29 @@ no_matches() {
   exit 0
 }
 
+calculate_percentage() {
+  local total=$1
+  local used=$2
+  local percentage
+  percentage=$(echo "$used/$total*100" | bc -l)
+  printf "%.2f%%" "$percentage"
+}
+
+analyze_ips() {
+  if $VERBOSE; then
+    print_header "Top $TOP_N IP Addresses (out of $TOTAL_REQUESTS requests)"
+    awk '{print $1}' "$TEMP_FILE" | sort | uniq -c | sort -nr | head -n "$TOP_N" | while read -r count ip; do
+      percentage=$(calculate_percentage "$TOTAL_REQUESTS" "$count")
+      print_stat "$ip" "$count $percentage" | awk '{printf "%-27s %-5s (%.2f%%)\n", $1, $2, $3}'
+    done
+  else
+    print_header "Top $TOP_N IP Addresses"
+    awk '{print $1}' "$TEMP_FILE" | sort | uniq -c | sort -nr | head -n "$TOP_N" | while read -r count ip; do
+      print_stat "$ip" "$count" | awk '{printf "%-27s %-5s\n", $1, $2}'
+    done
+  fi
+}
+
 main() {
   initialize_defaults
   parse_args "$@"
@@ -195,18 +220,18 @@ main() {
   echo -e "${GREEN}Generated on: $(date '+%Y-%m-%d %H:%M:%S')${NC}"
   echo -e "${GREEN}Analyzing log file: ${LOG_FILE}${NC}"
 
-  if [ "$VERBOSE" = true ]; then
+  if "$VERBOSE"; then
     print_header "Log File Information"
     print_stat "File Size" "$(du -h "$LOG_FILE" | cut -f1)"
     print_stat "Line Count" "$(wc -l < "$LOG_FILE")"
     print_stat "Date Range" "$(head -n1 "$LOG_FILE" | grep -o '\[[^]]*\]' | head -1) to $(tail -n1 "$LOG_FILE" | grep -o '\[[^]]*\]' | head -1)"
 
     if [[ -n "$FILTER_IP" || -n "$FILTER_PATH" || -n "$FILTER_STATUS" || -n "$TIME_RANGE" ]]; then
-        print_header "Active Filters"
-        [[ -n "$TIME_RANGE" ]] && print_stat "Time Range" "$TIME_RANGE"
-        [[ -n "$FILTER_IP" ]] && print_stat "IP Filter" "$FILTER_IP"
-        [[ -n "$FILTER_PATH" ]] && print_stat "Path Filter" "$FILTER_PATH"
-        [[ -n "$FILTER_STATUS" ]] && print_stat "Status Filter" "$FILTER_STATUS"
+      print_header "Active Filters"
+      [[ -n "$TIME_RANGE" ]] && print_stat "Time Range" "$TIME_RANGE"
+      [[ -n "$FILTER_IP" ]] && print_stat "IP Filter" "$FILTER_IP"
+      [[ -n "$FILTER_PATH" ]] && print_stat "Path Filter" "$FILTER_PATH"
+      [[ -n "$FILTER_STATUS" ]] && print_stat "Status Filter" "$FILTER_STATUS"
     fi
   fi
 
@@ -215,6 +240,10 @@ main() {
   eval "$FILTER_CMD" < "$LOG_FILE" > "$TEMP_FILE" || no_matches
 
   TOTAL_REQUESTS=$(wc -l < "$TEMP_FILE")
+
+  if [[ "$ONLY_SECTION" == "ip" || -z "$ONLY_SECTION" ]] && [ -z "$FILTER_IP" ]; then
+    analyze_ips
+  fi
 }
 
 main "$@"
