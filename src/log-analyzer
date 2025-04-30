@@ -185,6 +185,7 @@ no_matches() {
   exit 0
 }
 
+# Helper function to calculate percentage
 calculate_percentage() {
   local total=$1
   local part=$2
