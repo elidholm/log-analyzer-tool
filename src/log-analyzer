@@ -4,8 +4,6 @@
 # Author: Edvin Lidholm
 # Date: 2025-04-28
 
-set -eo pipefail
-
 LC_NUMERIC="en_US.UTF-8"
 
 # Color definitions
@@ -197,33 +195,39 @@ calculate_percentage() {
 }
 
 analyze_ips() {
-  if $VERBOSE; then
-    print_header "Top $TOP_N IP Addresses (out of $TOTAL_REQUESTS requests)"
-    awk '{print $1}' "$TEMP_FILE" | sort | uniq -c | sort -nr | head -n "$TOP_N" | while read -r count ip; do
-      percentage=$(calculate_percentage "$TOTAL_REQUESTS" "$count")
-      print_stat "$ip" "$count $percentage" | awk '{printf "%-27s %5.0f requests (%.2f%%)\n", $1, $2, $3}'
-    done
-  else
-    print_header "Top $TOP_N IP Addresses"
-    awk '{print $1}' "$TEMP_FILE" | sort | uniq -c | sort -nr | head -n "$TOP_N" | while read -r count ip; do
-      print_stat "$ip" "$count" | awk '{printf "%-27s %5.0f requests\n", $1, $2}'
-    done
-  fi
+  print_header "Top $TOP_N IP Addresses"
+  awk '{print $1}' "$TEMP_FILE" | sort | uniq -c | sort -nr | head -n "$TOP_N" | while read -r count ip; do
+    if $VERBOSE; then
+        percentage=$(calculate_percentage "$TOTAL_REQUESTS" "$count")
+        print_stat "$ip" "$count $percentage" | awk '{printf "%-27s %5.0f requests (%.2f%%)\n", $1, $2, $3}'
+    else
+        print_stat "$ip" "$count" | awk '{printf "%-27s %5.0f requests\n", $1, $2}'
+    fi
+  done
 }
 
 analyze_paths() {
-  if $VERBOSE; then
-    print_header "Top $TOP_N Request Paths (out of $TOTAL_REQUESTS requests)"
-    awk '{print $7}' "$TEMP_FILE" | sort | uniq -c | sort -nr | head -n "$TOP_N" | while read -r count path; do
-      percentage=$(calculate_percentage "$TOTAL_REQUESTS" "$count")
-      print_stat "$path" "$count $percentage" | awk '{printf "%-35s %5.0f requests (%.2f%%)\n", $1, $2, $3}'
-    done
-  else
-    print_header "Top $TOP_N Request Paths"
-    awk '{print $7}' "$TEMP_FILE" | sort | uniq -c | sort -nr | head -n "$TOP_N" | while read -r count path; do
-      print_stat "$path" "$count" | awk '{printf "%-35s %5.0f requests\n", $1, $2}'
-    done
-  fi
+  print_header "Top $TOP_N Request Paths"
+  awk '{print $7}' "$TEMP_FILE" | sort | uniq -c | sort -nr | head -n "$TOP_N" | while read -r count path; do
+    if $VERBOSE; then
+        percentage=$(calculate_percentage "$TOTAL_REQUESTS" "$count")
+        print_stat "$path" "$count $percentage" | awk '{printf "%-35s %5.0f requests (%.2f%%)\n", $1, $2, $3}'
+    else
+        print_stat "$path" "$count" | awk '{printf "%-35s %5.0f requests\n", $1, $2}'
+    fi
+  done
+}
+
+analyze_status() {
+  print_header "Top $TOP_N HTTP Status Codes"
+  awk '{printf ""; for(i=1; i<=NF; i++) if($i ~ /^[0-9]+$/) printf "%s ", $i; printf "\n"}' "$TEMP_FILE" | awk '{print $1}' | sort | uniq -c | sort -nr | head -n "$TOP_N" | while read -r count status; do
+    if $VERBOSE; then
+        percentage=$(calculate_percentage "$TOTAL_REQUESTS" "$count")
+        print_stat "$status" "$count $percentage" | awk '{printf "%-10s %5.0f requests (%.2f%%)\n", $1, $2, $3}'
+    else
+        print_stat "$status" "$count" | awk '{printf "%-10s %5.0f requests\n", $1, $2}'
+    fi
+  done
 }
 
 main() {
@@ -257,12 +261,17 @@ main() {
 
   TOTAL_REQUESTS=$(wc -l < "$TEMP_FILE")
 
+  # Main analysis based on selected section
   if [[ "$ONLY_SECTION" == "ip" || -z "$ONLY_SECTION" ]] && [ -z "$FILTER_IP" ]; then
     analyze_ips
   fi
 
   if [[ "$ONLY_SECTION" == "path" || -z "$ONLY_SECTION" ]] && [ -z "$FILTER_PATH" ]; then
     analyze_paths
+  fi
+
+  if [[ "$ONLY_SECTION" == "status" || -z "$ONLY_SECTION" ]] && [ -z "$FILTER_STATUS" ]; then
+    analyze_status
   fi
 }
 
