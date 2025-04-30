@@ -6,11 +6,13 @@ on:
     branches:
       - master
     paths:
+      - "src/*"
       - "**/*.sh"
   pull_request:
     branches:
       - master
     paths:
+      - "src/*"
       - "**/*.sh"
 
 jobs:
