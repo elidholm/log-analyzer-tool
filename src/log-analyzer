@@ -178,6 +178,13 @@ get_filter_command() {
   fi
 }
 
+no_matches() {
+  warning "No matching log entries found with current filters."
+  log_message "Please check your filters or try again."
+  rm -f "$TEMP_FILE"
+  exit 0
+}
+
 main() {
   initialize_defaults
   parse_args "$@"
@@ -202,6 +209,12 @@ main() {
         [[ -n "$FILTER_STATUS" ]] && print_stat "Status Filter" "$FILTER_STATUS"
     fi
   fi
+
+  get_filter_command
+  TEMP_FILE=$(mktemp)
+  eval "$FILTER_CMD" < "$LOG_FILE" > "$TEMP_FILE" || no_matches
+
+  TOTAL_REQUESTS=$(wc -l < "$TEMP_FILE")
 }
 
 main "$@"
