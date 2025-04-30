@@ -181,6 +181,7 @@ get_filter_command() {
 }
 
 no_matches() {
+  echo
   warning "No matching log entries found with current filters."
   log_message "Please check your filters or try again."
   rm -f "$TEMP_FILE"
@@ -200,12 +201,27 @@ analyze_ips() {
     print_header "Top $TOP_N IP Addresses (out of $TOTAL_REQUESTS requests)"
     awk '{print $1}' "$TEMP_FILE" | sort | uniq -c | sort -nr | head -n "$TOP_N" | while read -r count ip; do
       percentage=$(calculate_percentage "$TOTAL_REQUESTS" "$count")
-      print_stat "$ip" "$count $percentage" | awk '{printf "%-27s %-5s (%.2f%%)\n", $1, $2, $3}'
+      print_stat "$ip" "$count $percentage" | awk '{printf "%-27s %5.0f requests (%.2f%%)\n", $1, $2, $3}'
     done
   else
     print_header "Top $TOP_N IP Addresses"
     awk '{print $1}' "$TEMP_FILE" | sort | uniq -c | sort -nr | head -n "$TOP_N" | while read -r count ip; do
-      print_stat "$ip" "$count" | awk '{printf "%-27s %-5s\n", $1, $2}'
+      print_stat "$ip" "$count" | awk '{printf "%-27s %5.0f requests\n", $1, $2}'
+    done
+  fi
+}
+
+analyze_paths() {
+  if $VERBOSE; then
+    print_header "Top $TOP_N Request Paths (out of $TOTAL_REQUESTS requests)"
+    awk '{print $7}' "$TEMP_FILE" | sort | uniq -c | sort -nr | head -n "$TOP_N" | while read -r count path; do
+      percentage=$(calculate_percentage "$TOTAL_REQUESTS" "$count")
+      print_stat "$path" "$count $percentage" | awk '{printf "%-35s %5.0f requests (%.2f%%)\n", $1, $2, $3}'
+    done
+  else
+    print_header "Top $TOP_N Request Paths"
+    awk '{print $7}' "$TEMP_FILE" | sort | uniq -c | sort -nr | head -n "$TOP_N" | while read -r count path; do
+      print_stat "$path" "$count" | awk '{printf "%-35s %5.0f requests\n", $1, $2}'
     done
   fi
 }
@@ -243,6 +259,10 @@ main() {
 
   if [[ "$ONLY_SECTION" == "ip" || -z "$ONLY_SECTION" ]] && [ -z "$FILTER_IP" ]; then
     analyze_ips
+  fi
+
+  if [[ "$ONLY_SECTION" == "path" || -z "$ONLY_SECTION" ]] && [ -z "$FILTER_PATH" ]; then
+    analyze_paths
   fi
 }
 
